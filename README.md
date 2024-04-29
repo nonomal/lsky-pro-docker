@@ -1,6 +1,7 @@
 # Lsky-Pro Docker镜像
 
-每天自动拉取最新代码构建Docker镜像
+~~每天自动拉取最新代码构建Docker镜像，~~ 现已上传amd64和arm64两种硬件架构。
+> 由于开源版长时间未维护，目前暂停了自动拉取代码上传。待开源版有更新之后会恢复自动构建
 
 ## 使用方法
 
@@ -8,10 +9,46 @@
 docker run -d \
     --name lsky-pro \
     --restart unless-stopped \
-    -p 9080:80 \
-    -v /path-to-data:/var/www/html \
+    -p 8089:8089 \
+    -v $PWD/lsky:/var/www/html \
+    -e WEB_PORT=8089 \
     halcyonazure/lsky-pro-docker:latest
 ```
+
+### 如果要使用Nginx反向代理配置HTTPS，则使用HTTPS访问容器
+
+```docker
+docker run -d \
+    --name lsky-pro \
+    --restart unless-stopped \
+    -p 8088:8088 \
+    -p 8089:8089 \
+    -v $PWD/lsky:/var/www/html \
+    -e HTTPS_PORT=8088 \
+    -e WEB_PORT=8089 \
+    halcyonazure/lsky-pro-docker:latest
+```
+
+Nginx配置文件示例：
+
+```nginx
+location ^~ /
+{
+    proxy_pass https://127.0.0.1:8088;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header REMOTE-HOST $remote_addr;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_http_version 1.1;
+}
+```
+
+
+## 环境变量
+
+目前该容器只有一个环境变量：`WEB_PORT`，用于指定容器内的`Apache`监听的端口，默认为`8089`，如果需要修改的话可以在启动容器时添加`-e WEB_PORT=8089`来指定端口
 
 ### Windows内以`WSL`的方式部署`Docker`容器
 
@@ -19,13 +56,9 @@ docker run -d \
 
 ## 反代HTTPS
 
-如果使用了Nginx反代后，如果出现无法加载图片的问题，可以根据原项目 [#317](https://github.com/lsky-org/lsky-pro/issues/317) 执行以下指令来手动修改容器内`AppServiceProvider.php`文件对于HTTPS的支持
+### 使用非443端口反代服务
 
-***Tips：将lskypro改为自己容器的名字***
-
-```bash
-docker exec -it lskypro sed -i '32 a \\\Illuminate\\Support\\Facades\\URL::forceScheme('"'"'https'"'"');' /var/www/html/app/Providers/AppServiceProvider.php
-```
+如果是在自家宽带进行图床的部署，无法使用`443`端口，在`Nginx`的配置文件需要进行一些修改，可以参考：Docker部署后，[非443端口域名反代图床服务配置问题](https://github.com/HalcyonAzure/lsky-pro-docker/issues/7)
 
 ## Docker-Compose部署参考
 
@@ -39,13 +72,16 @@ services:
     restart: unless-stopped
     hostname: lskypro
     container_name: lskypro
+    environment:
+      - WEB_PORT=8089
     volumes:
-      - /data/lsky/web:/var/www/html/
+      - $PWD/web:/var/www/html/
     ports:
-      - "9080:80"
+      - "9080:8089"
     networks:
       - lsky-net
 
+  # 注：arm64的无法使用该镜像，请选择sqlite或自建数据库
   mysql-lsky:
     image: mysql:5.7.22
     restart: unless-stopped
@@ -56,9 +92,9 @@ services:
     # 修改加密规则
     command: --default-authentication-plugin=mysql_native_password
     volumes:
-      - /data/lsky/mysql/data:/var/lib/mysql
-      - /data/lsky/mysql/conf:/etc/mysql
-      - /data/lsky/mysql/log:/var/log/mysql
+      - $PWD/mysql/data:/var/lib/mysql
+      - $PWD/mysql/conf:/etc/mysql
+      - $PWD/mysql/log:/var/log/mysql
     environment:
       MYSQL_ROOT_PASSWORD: lAsWjb6rzSzENUYg # 数据库root用户密码，自行修改
       MYSQL_DATABASE: lsky-data # 可作为"数据库名称/路径"
@@ -70,6 +106,21 @@ networks:
 ```
 
 原项目：[☁️兰空图床(Lsky Pro) - Your photo album on the cloud.](https://github.com/lsky-org/lsky-pro)
+
+## 构建您自己的镜像
+
+现在，您可以通过提供的Dockerfile直接构建自己的Lsky-Pro镜像。Dockerfile已经配置为多段构建，不再需要手动拉取源码。下面的命令展示了如何构建镜像：
+
+```bash
+docker build -t lsky-pro-docker .
+```
+
+如果您想为不同的硬件架构构建镜像（例如，arm64或amd64），您可以使用以下命令：
+
+```bash
+docker buildx create --use
+docker buildx build --platform linux/amd64,linux/arm64 -t lsky-pro-docker .
+```
 
 ## 手动备份/升级
 
